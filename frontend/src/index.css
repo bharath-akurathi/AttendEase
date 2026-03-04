@@ -1,0 +1,143 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Theme CSS Variables ── */
+:root,
+[data-theme="dark"] {
+  --bg-primary: #09090B;
+  --bg-secondary: #111117;
+  --bg-tertiary: #1a1a24;
+  --bg-elevated: rgba(17, 17, 23, 0.8);
+  --bg-input: #09090B;
+  --border-primary: rgba(39, 39, 42, 0.5);
+  --border-subtle: rgba(39, 39, 42, 0.3);
+  --border-hover: rgba(63, 63, 70, 0.7);
+  --text-primary: #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-tertiary: #71717a;
+  --text-muted: #52525b;
+  --text-faint: #3f3f46;
+  --accent: #7c3aed;
+  --accent-muted: rgba(124, 58, 237, 0.1);
+  --accent-border: rgba(124, 58, 237, 0.2);
+  --scrollbar-thumb: #3f3f46;
+  --scrollbar-hover: #52525b;
+  --shadow-color: rgba(0, 0, 0, 0.3);
+  --nav-bg: rgba(9, 9, 11, 0.6);
+  --card-hover-border: rgba(124, 58, 237, 0.15);
+}
+
+[data-theme="light"] {
+  --bg-primary: #fafafa;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f4f4f5;
+  --bg-elevated: rgba(255, 255, 255, 0.85);
+  --bg-input: #f4f4f5;
+  --border-primary: rgba(228, 228, 231, 0.8);
+  --border-subtle: rgba(228, 228, 231, 0.5);
+  --border-hover: rgba(161, 161, 170, 0.5);
+  --text-primary: #09090B;
+  --text-secondary: #52525b;
+  --text-tertiary: #71717a;
+  --text-muted: #a1a1aa;
+  --text-faint: #d4d4d8;
+  --accent: #7c3aed;
+  --accent-muted: rgba(124, 58, 237, 0.08);
+  --accent-border: rgba(124, 58, 237, 0.15);
+  --scrollbar-thumb: #d4d4d8;
+  --scrollbar-hover: #a1a1aa;
+  --shadow-color: rgba(0, 0, 0, 0.06);
+  --nav-bg: rgba(250, 250, 250, 0.7);
+  --card-hover-border: rgba(124, 58, 237, 0.25);
+}
+
+@layer base {
+  body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    @apply antialiased;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+}
+
+/* ── Utility classes using CSS vars ── */
+.bg-page {
+  background-color: var(--bg-primary);
+}
+
+.bg-card {
+  background-color: var(--bg-secondary);
+}
+
+.bg-card-alt {
+  background-color: var(--bg-tertiary);
+}
+
+.bg-elevated {
+  background-color: var(--bg-elevated);
+}
+
+.bg-input {
+  background-color: var(--bg-input);
+}
+
+.border-theme {
+  border-color: var(--border-primary);
+}
+
+.border-subtle {
+  border-color: var(--border-subtle);
+}
+
+.text-heading {
+  color: var(--text-primary);
+}
+
+.text-body {
+  color: var(--text-secondary);
+}
+
+.text-muted {
+  color: var(--text-tertiary);
+}
+
+.text-faint {
+  color: var(--text-muted);
+}
+
+.nav-bg {
+  background-color: var(--nav-bg);
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
+}
+
+/* ── Smooth transitions on theme change ── */
+* {
+  transition-property: background-color, border-color, color;
+  transition-duration: 0.2s;
+  transition-timing-function: ease;
+}
+
+/* Exclude animations from theme transition */
+.no-theme-transition,
+.no-theme-transition * {
+  transition-property: none !important;
+}

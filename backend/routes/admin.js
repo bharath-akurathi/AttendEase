@@ -1,0 +1,243 @@
+import express from 'express';
+import { requireAuth } from '../middleware/authMiddleware.js';
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+dotenv.config();
+
+const router = express.Router();
+router.use(requireAuth);
+
+// Admin middleware
+const requireAdmin = async (req, res, next) => {
+    try {
+        const { data: profile, error } = await req.supabase
+            .from('profiles').select('role').eq('id', req.user.sub).single();
+        if (error || profile?.role !== 'admin') {
+            return res.status(403).json({ error: 'Admin access required' });
+        }
+        next();
+    } catch (err) {
+        res.status(500).json({ error: 'Server error verifying role.' });
+    }
+};
+
+router.use(requireAdmin);
+
+// Service-role client for admin operations (bypass RLS)
+const supabaseService = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_ANON_KEY
+);
+
+// 1. System Statistics
+router.get('/stats', async (req, res) => {
+    try {
+        const { data, error } = await req.supabase.rpc('get_system_stats');
+        if (error) throw error;
+        res.json(data);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 2. Get All Users
+router.get('/users', async (req, res) => {
+    try {
+        let query = req.supabase
+            .from('profiles')
+            .select('*, regulations(code), courses(name, code)')
+            .order('created_at', { ascending: false });
+
+        if (req.query.role) query = query.eq('role', req.query.role);
+        if (req.query.courseId) query = query.eq('course_id', req.query.courseId);
+        if (req.query.regulationId) query = query.eq('regulation_id', req.query.regulationId);
+        if (req.query.search) {
+            query = query.or(`full_name.ilike.%${req.query.search}%,roll_number.ilike.%${req.query.search}%`);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+        res.json(data || []);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 3. Update User Role (support both PUT and PATCH)
+const handleRoleUpdate = async (req, res) => {
+    try {
+        const { role } = req.body;
+        if (!['student', 'teacher', 'admin'].includes(role)) {
+            return res.status(400).json({ error: 'Invalid role' });
+        }
+        if (req.params.id === req.user.sub && role !== 'admin') {
+            return res.status(400).json({ error: 'Cannot demote yourself' });
+        }
+        const { data, error } = await req.supabase
+            .from('profiles')
+            .update({ role })
+            .eq('id', req.params.id)
+            .select()
+            .single();
+        if (error) throw error;
+        res.json(data);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+router.put('/users/:id/role', handleRoleUpdate);
+router.patch('/users/:id/role', handleRoleUpdate);
+
+// 3b. Update Teacher Permissions
+router.patch('/users/:id/permissions', async (req, res) => {
+    try {
+        const allowedKeys = ['can_create_subjects', 'can_edit_subjects', 'can_delete_subjects'];
+        const updates = {};
+        for (const key of allowedKeys) {
+            if (typeof req.body[key] === 'boolean') updates[key] = req.body[key];
+        }
+        if (Object.keys(updates).length === 0) {
+            return res.status(400).json({ error: 'No valid permissions provided' });
+        }
+        const { data, error } = await req.supabase
+            .from('profiles')
+            .update(updates)
+            .eq('id', req.params.id)
+            .select()
+            .single();
+        if (error) throw error;
+        res.json(data);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 4. Create Student Account
+router.post('/students', async (req, res) => {
+    try {
+        const { roll_number, full_name, regulation_id, course_id, current_year, current_semester } = req.body;
+
+        if (!roll_number || !full_name) {
+            return res.status(400).json({ error: 'roll_number and full_name required' });
+        }
+
+        // Check if roll number already exists
+        const { data: existing } = await req.supabase
+            .from('profiles')
+            .select('id')
+            .eq('roll_number', roll_number)
+            .single();
+
+        if (existing) {
+            return res.status(409).json({ error: `Student with roll number ${roll_number} already exists` });
+        }
+
+        // Create auth user with roll number as email (internal mapping)
+        const internalEmail = `${roll_number.toLowerCase()}@attendease.local`;
+        const tempPassword = `AE_${roll_number}_${Date.now()}`;
+
+        // For now, just create/update the profile directly
+        // Full auth user creation requires service_role key
+        // Instead, update existing profile if found, or return instructions
+        const { data: profile, error: profileError } = await req.supabase
+            .from('profiles')
+            .select('id')
+            .eq('roll_number', roll_number)
+            .maybeSingle();
+
+        if (profile) {
+            // Update existing
+            const { data, error } = await req.supabase
+                .from('profiles')
+                .update({
+                    full_name,
+                    regulation_id: regulation_id || null,
+                    course_id: course_id || null,
+                    current_year: current_year || null,
+                    current_semester: current_semester || null
+                })
+                .eq('id', profile.id)
+                .select()
+                .single();
+            if (error) throw error;
+            res.json({ message: 'Student profile updated', data });
+        } else {
+            // Return guidance — full user creation needs service_role
+            res.status(200).json({
+                message: 'Roll number not found. Student must first sign up via Google OAuth, then admin can assign their roll number.',
+                roll_number,
+                action_required: 'assign_roll_number'
+            });
+        }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 5. Assign Roll Number to Existing User
+router.put('/users/:id/roll-number', async (req, res) => {
+    try {
+        const { roll_number, regulation_id, course_id, current_year, current_semester } = req.body;
+        if (!roll_number) return res.status(400).json({ error: 'roll_number required' });
+
+        const update = { roll_number };
+        if (regulation_id) update.regulation_id = regulation_id;
+        if (course_id) update.course_id = course_id;
+        if (current_year) update.current_year = current_year;
+        if (current_semester) update.current_semester = current_semester;
+
+        const { data, error } = await req.supabase
+            .from('profiles')
+            .update(update)
+            .eq('id', req.params.id)
+            .select()
+            .single();
+        if (error) throw error;
+        res.json(data);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 6. Advance Student Semester
+router.put('/students/:id/semester', async (req, res) => {
+    try {
+        const { current_year, current_semester } = req.body;
+        if (!current_year || !current_semester) {
+            return res.status(400).json({ error: 'current_year and current_semester required' });
+        }
+
+        const { data, error } = await req.supabase
+            .from('profiles')
+            .update({ current_year, current_semester })
+            .eq('id', req.params.id)
+            .select()
+            .single();
+        if (error) throw error;
+        res.json(data);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 7. Get All Subjects (with teacher + enrollment count)
+router.get('/subjects', async (req, res) => {
+    try {
+        const { data, error } = await req.supabase
+            .from('subjects')
+            .select(`
+                *,
+                regulations(code, name),
+                courses(name, code),
+                profiles!subjects_teacher_id_fkey(full_name),
+                subject_enrollments(count)
+            `)
+            .order('year').order('semester').order('name');
+        if (error) throw error;
+        res.json(data || []);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+export default router;
