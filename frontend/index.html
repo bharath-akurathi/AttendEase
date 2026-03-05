@@ -1,16 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" href="/icon-512.png" sizes="any">
-    <title>AttendEase | Attendance System</title>
-    <style>
-      body { margin: 0; padding: 0; background: #fafafa; }
-    </style>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="/icon-512.png" sizes="any">
+  <title>AttendEase | Attendance System</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #fafafa;
+    }
+  </style>
+</head>
+
+<body>
+  <script>
+    // Vite's client stores dependency signatures in localStorage. 
+    // If corrupted, it forces an infinite window.location.reload() loop.
+    // Clearing these specific keys fixes the loop without logging out the user.
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('vite:')) {
+        localStorage.removeItem(key);
+      }
+    }
+  </script>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+
 </html>

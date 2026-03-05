@@ -1,10 +1,10 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { AcademicProvider } from './context/AcademicContext';
-import { Loader2 } from 'lucide-react';
 import { Toaster } from 'sonner';
+import BrandLoader from './components/BrandLoader';
 
 import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
@@ -20,25 +20,17 @@ const pageTransition = {
 
 function AppContent() {
     const { user, profile, loading } = useAuth();
+    const location = useLocation();
 
     if (loading) {
-        return (
-            <div className="fixed inset-0 flex items-center justify-center bg-page">
-                <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
-                >
-                    <Loader2 className="w-8 h-8 text-violet-500" />
-                </motion.div>
-            </div>
-        );
+        return <BrandLoader isFullScreen={true} speed="fast" />;
     }
 
     return (
         <div className="min-h-screen bg-page text-heading font-sans">
             <Toaster position="top-center" richColors theme="dark" />
             <AnimatePresence mode="wait">
-                <Routes>
+                <Routes location={location} key={location.pathname}>
                     <Route
                         path="/"
                         element={

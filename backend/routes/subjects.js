@@ -206,43 +206,120 @@ router.delete('/:id/students/:stuId', async (req, res) => {
     }
 });
 
-// POST bulk add students
+// POST bulk add students (supports roll_numbers array OR prefix+start+end range)
 router.post('/:id/students/bulk', async (req, res) => {
     try {
         if (!await checkTeacherOrAdmin(req)) {
             return res.status(403).json({ error: 'Teachers/admins only' });
         }
 
-        const { roll_numbers } = req.body; // Array of roll numbers
-        if (!roll_numbers || !Array.isArray(roll_numbers) || roll_numbers.length === 0) {
-            return res.status(400).json({ error: 'roll_numbers array required' });
+        const { roll_numbers, prefix, start, end } = req.body;
+        let rollList = [];
+
+        if (prefix !== undefined && start !== undefined && end !== undefined) {
+            // Range mode: generate roll numbers
+            const startNum = parseInt(start);
+            const endNum = parseInt(end);
+            if (isNaN(startNum) || isNaN(endNum) || startNum > endNum) {
+                return res.status(400).json({ error: 'Invalid range' });
+            }
+            if (endNum - startNum + 1 > 200) {
+                return res.status(400).json({ error: 'Maximum 200 students per batch' });
+            }
+            // Use the digit width of the original 'end' input to preserve formatting
+            const padWidth = String(end).length;
+            for (let i = startNum; i <= endNum; i++) {
+                rollList.push(`${prefix.toUpperCase()}${String(i).padStart(padWidth, '0')}`);
+            }
+        } else if (roll_numbers && Array.isArray(roll_numbers) && roll_numbers.length > 0) {
+            rollList = roll_numbers.map(r => r.trim().toUpperCase());
+        } else {
+            return res.status(400).json({ error: 'Provide roll_numbers array OR prefix+start+end' });
         }
 
-        // Find all students by roll numbers
-        const { data: students } = await req.supabase
-            .from('profiles')
-            .select('id, roll_number')
-            .in('roll_number', roll_numbers);
+        // Service-role client for creating accounts
+        const { createClient } = await import('@supabase/supabase-js');
+        const supabaseService = createClient(
+            process.env.SUPABASE_URL,
+            process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+        );
 
-        if (!students || students.length === 0) {
-            return res.status(404).json({ error: 'No matching students found' });
+        const created = [];
+        const enrolled = [];
+        const skipped = [];
+        const errors = [];
+
+        for (const rollNo of rollList) {
+            if (rollNo.length !== 10) {
+                errors.push({ roll_number: rollNo, error: 'Roll number must be exactly 10 characters long' });
+                continue;
+            }
+
+            // Check if profile exists
+            let { data: student } = await supabaseService
+                .from('profiles')
+                .select('id, roll_number')
+                .eq('roll_number', rollNo)
+                .maybeSingle();
+
+            // Auto-create if not found
+            if (!student) {
+                const email = `${rollNo.toLowerCase()}@student.attendease.local`;
+                const { data: authData, error: authError } = await supabaseService.auth.admin.createUser({
+                    email,
+                    password: crypto.randomUUID() + crypto.randomUUID(),
+                    email_confirm: true,
+                    user_metadata: {
+                        full_name: rollNo,
+                        role: 'student',
+                        roll_number: rollNo
+                    }
+                });
+
+                if (authError) {
+                    errors.push({ roll_number: rollNo, error: authError.message });
+                    continue;
+                }
+
+                // Wait for trigger to create profile, then fetch it
+                await new Promise(r => setTimeout(r, 200));
+                const { data: newProfile } = await supabaseService
+                    .from('profiles')
+                    .select('id, roll_number')
+                    .eq('id', authData.user.id)
+                    .maybeSingle();
+
+                student = newProfile;
+                created.push(rollNo);
+            }
+
+            if (!student) {
+                errors.push({ roll_number: rollNo, error: 'Profile creation failed' });
+                continue;
+            }
+
+            // Enroll in subject
+            const { error: enrollError } = await supabaseService
+                .from('subject_enrollments')
+                .upsert(
+                    { subject_id: req.params.id, student_id: student.id },
+                    { onConflict: 'subject_id,student_id', ignoreDuplicates: true }
+                );
+
+            if (enrollError) {
+                errors.push({ roll_number: rollNo, error: enrollError.message });
+            } else {
+                enrolled.push(rollNo);
+            }
         }
 
-        const records = students.map(s => ({
-            subject_id: req.params.id,
-            student_id: s.id
-        }));
-
-        const { data, error } = await req.supabase
-            .from('subject_enrollments')
-            .upsert(records, { onConflict: 'subject_id,student_id', ignoreDuplicates: true })
-            .select();
-        if (error) throw error;
-
-        const notFound = roll_numbers.filter(rn => !students.find(s => s.roll_number === rn));
         res.status(201).json({
-            enrolled: data?.length || 0,
-            not_found: notFound
+            total_enrolled: enrolled.length,
+            total_created: created.length,
+            skipped,
+            errors,
+            created,
+            enrolled
         });
     } catch (err) {
         res.status(500).json({ error: err.message });

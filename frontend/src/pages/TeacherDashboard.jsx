@@ -4,9 +4,10 @@ import { useAuth } from '../context/AuthContext';
 import { useAcademic } from '../context/AcademicContext';
 import { useTheme } from '../context/ThemeContext';
 import ThemeToggle from '../components/ThemeToggle';
+import ChangePassword from '../components/ChangePassword';
 import {
     BookOpen, Users, Calendar, Download, Plus, Trash2, Search,
-    LogOut, ChevronRight, Check, X, Loader2, Lock
+    LogOut, ChevronRight, Check, X, Loader2, Lock, UserPlus, Key
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -34,6 +35,12 @@ const TeacherDashboard = () => {
     const [showCreateForm, setShowCreateForm] = useState(false);
     const [newSubject, setNewSubject] = useState({ regulation_id: '', course_id: '', year: 1, semester: 1, name: '', code: '', section: '' });
     const [newRollNumber, setNewRollNumber] = useState('');
+    const [showBulkModal, setShowBulkModal] = useState(false);
+    const [bulkPrefix, setBulkPrefix] = useState('');
+    const [bulkStart, setBulkStart] = useState('');
+    const [bulkEnd, setBulkEnd] = useState('');
+    const [bulkLoading, setBulkLoading] = useState(false);
+    const [showChangePassword, setShowChangePassword] = useState(false);
 
     const fetchSubjects = useCallback(async () => {
         try {
@@ -130,6 +137,33 @@ const TeacherDashboard = () => {
         } catch { toast.error('Export failed'); }
     };
 
+    const handleBulkAdd = async () => {
+        if (!selectedSubject || !bulkPrefix || !bulkStart || !bulkEnd) return toast.error('Fill all fields');
+        setBulkLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/subjects/${selectedSubject.id}/students/bulk`, {
+                method: 'POST', headers,
+                body: JSON.stringify({ prefix: bulkPrefix, start: bulkStart, end: bulkEnd })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+            toast.success(`Enrolled ${data.total_enrolled} students (${data.total_created} new accounts created)`);
+            if (data.errors?.length > 0) toast.warning(`${data.errors.length} errors occurred`);
+            setShowBulkModal(false);
+            fetchStudents(selectedSubject.id);
+        } catch (err) { toast.error(err.message); }
+        finally { setBulkLoading(false); }
+    };
+
+    const bulkPreview = () => {
+        if (!bulkPrefix || !bulkStart || !bulkEnd) return [];
+        const s = parseInt(bulkStart), e = parseInt(bulkEnd);
+        if (isNaN(s) || isNaN(e) || s > e) return [];
+        const count = e - s + 1;
+        const padWidth = bulkEnd.length;
+        return { count, first: `${bulkPrefix.toUpperCase()}${String(s).padStart(padWidth, '0')}`, last: `${bulkPrefix.toUpperCase()}${String(e).padStart(padWidth, '0')}` };
+    };
+
     const filteredStudents = students.filter(s => {
         if (!searchQuery) return true;
         return (s.profiles?.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -150,6 +184,7 @@ const TeacherDashboard = () => {
                     </div>
                     <div className="flex items-center gap-3">
                         <span className="text-sm text-heading font-medium hidden sm:block">{profile?.full_name}</span>
+                        <button onClick={() => setShowChangePassword(true)} className="p-2 text-muted hover:text-violet-400 transition-colors" title="Change Password"><Key className="w-4 h-4" /></button>
                         <ThemeToggle />
                         <button onClick={logout} className="p-2 text-muted hover:text-heading transition-colors"><LogOut className="w-4 h-4" /></button>
                     </div>
@@ -276,6 +311,9 @@ const TeacherDashboard = () => {
                                                 className="px-3 py-1.5 bg-card border border-theme rounded-lg text-heading text-xs focus:border-violet-500/50 focus:outline-none w-36"
                                                 onKeyDown={e => e.key === 'Enter' && handleAddStudent()} />
                                             <button onClick={handleAddStudent} className="p-1.5 bg-violet-600/10 text-violet-400 rounded-lg hover:bg-violet-600/20"><Plus className="w-4 h-4" /></button>
+                                            <button onClick={() => setShowBulkModal(true)} className="px-3 py-1.5 bg-violet-600/10 text-violet-400 rounded-lg hover:bg-violet-600/20 text-xs font-medium flex items-center gap-1">
+                                                <UserPlus className="w-3.5 h-3.5" /> Bulk Add
+                                            </button>
                                         </div>
                                     )}
                                 </div>
@@ -317,8 +355,86 @@ const TeacherDashboard = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Bulk Add Modal */}
+            <AnimatePresence>
+                {showBulkModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+                        onClick={() => setShowBulkModal(false)}
+                    >
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                            className="w-full max-w-md mx-4 bg-elevated border border-violet-500/10 rounded-2xl p-6 shadow-2xl"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="flex items-center justify-between mb-5">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-8 h-8 rounded-lg bg-violet-600/10 flex items-center justify-center">
+                                        <UserPlus className="w-4 h-4 text-violet-400" />
+                                    </div>
+                                    <h3 className="text-heading font-semibold text-sm">Add Students in Bulk</h3>
+                                </div>
+                                <button onClick={() => setShowBulkModal(false)} className="p-1.5 text-muted hover:text-heading rounded-lg transition-colors">
+                                    <X className="w-4 h-4" />
+                                </button>
+                            </div>
+
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-xs uppercase tracking-wider text-muted mb-1.5 font-medium">Roll Number Prefix</label>
+                                    <input value={bulkPrefix} onChange={e => setBulkPrefix(e.target.value.toUpperCase())} placeholder="e.g. 23011P05"
+                                        className="w-full px-3 py-2.5 bg-input border border-theme rounded-xl text-heading text-sm placeholder-faint focus:outline-none focus:border-violet-500/50 uppercase" />
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs uppercase tracking-wider text-muted mb-1.5 font-medium">Start No.</label>
+                                        <input type="number" value={bulkStart} onChange={e => setBulkStart(e.target.value)} placeholder="01"
+                                            className="w-full px-3 py-2.5 bg-input border border-theme rounded-xl text-heading text-sm placeholder-faint focus:outline-none focus:border-violet-500/50" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs uppercase tracking-wider text-muted mb-1.5 font-medium">End No.</label>
+                                        <input type="number" value={bulkEnd} onChange={e => setBulkEnd(e.target.value)} placeholder="60"
+                                            className="w-full px-3 py-2.5 bg-input border border-theme rounded-xl text-heading text-sm placeholder-faint focus:outline-none focus:border-violet-500/50" />
+                                    </div>
+                                </div>
+
+                                {(() => {
+                                    const preview = bulkPreview();
+                                    if (preview && preview.count) {
+                                        return (
+                                            <div className="bg-violet-600/5 border border-violet-500/10 rounded-xl p-3">
+                                                <p className="text-xs text-muted">
+                                                    Will generate <span className="text-violet-400 font-bold">{preview.count}</span> roll numbers:
+                                                    <span className="text-heading font-mono ml-1">{preview.first}</span> → <span className="text-heading font-mono">{preview.last}</span>
+                                                </p>
+                                                {/* <p className="text-[10px] text-muted mt-1">Students not in DB will be auto-created with password <code className="text-violet-400">test1234</code></p> */}
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                })()}
+
+                                <button onClick={handleBulkAdd} disabled={bulkLoading}
+                                    className="w-full py-3 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-xl font-medium text-sm flex items-center justify-center gap-2 hover:from-violet-500 hover:to-purple-500 transition-all disabled:opacity-50 shadow-lg shadow-violet-600/20">
+                                    {bulkLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                                    {bulkLoading ? 'Adding Students...' : 'Add Students'}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            <ChangePassword isOpen={showChangePassword} onClose={() => setShowChangePassword(false)} />
         </div>
     );
 };
 
 export default TeacherDashboard;
+

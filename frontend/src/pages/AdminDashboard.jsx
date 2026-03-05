@@ -4,10 +4,11 @@ import { useAuth } from '../context/AuthContext';
 import { useAcademic } from '../context/AcademicContext';
 import { useTheme } from '../context/ThemeContext';
 import ThemeToggle from '../components/ThemeToggle';
+import ChangePassword from '../components/ChangePassword';
 import {
     Users, BookOpen, Settings, BarChart3, Plus, Trash2, Edit2,
     LogOut, ChevronRight, ChevronDown, Check, X, Loader2,
-    Shield, GraduationCap, Lock, Unlock, Eye
+    Shield, GraduationCap, Lock, Unlock, Eye, UserPlus, Key
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -29,6 +30,17 @@ const AdminDashboard = () => {
     const [newCourse, setNewCourse] = useState({ name: '', code: '', regulation_id: '', total_semesters: 8 });
     const [showRegForm, setShowRegForm] = useState(false);
     const [showCourseForm, setShowCourseForm] = useState(false);
+    const [showChangePassword, setShowChangePassword] = useState(false);
+    // Bulk students state
+    const [bulkPrefix, setBulkPrefix] = useState('');
+    const [bulkStart, setBulkStart] = useState('');
+    const [bulkEnd, setBulkEnd] = useState('');
+    const [bulkRegulation, setBulkRegulation] = useState('');
+    const [bulkCourse, setBulkCourse] = useState('');
+    const [bulkYear, setBulkYear] = useState(1);
+    const [bulkSemester, setBulkSemester] = useState(1);
+    const [bulkLoading, setBulkLoading] = useState(false);
+    const [bulkResult, setBulkResult] = useState(null);
 
     const fetchUsers = useCallback(async () => {
         try {
@@ -106,7 +118,32 @@ const AdminDashboard = () => {
         { id: 'users', label: 'Users', icon: Users },
         { id: 'academic', label: 'Academic', icon: GraduationCap },
         { id: 'subjects', label: 'Subjects', icon: BookOpen },
+        { id: 'bulk', label: 'Bulk Students', icon: UserPlus },
     ];
+
+    const handleBulkCreate = async () => {
+        if (!bulkPrefix || !bulkStart || !bulkEnd) return toast.error('Fill prefix, start, and end');
+        if (bulkPrefix.length + bulkEnd.length !== 10) {
+            return toast.error(`Roll numbers must be exactly 10 characters (currently ${bulkPrefix.length + bulkEnd.length})`);
+        }
+        setBulkLoading(true); setBulkResult(null);
+        try {
+            const res = await fetch(`${API_BASE}/api/admin/students/bulk-range`, {
+                method: 'POST', headers,
+                body: JSON.stringify({
+                    prefix: bulkPrefix, start: bulkStart, end: bulkEnd,
+                    regulation_id: bulkRegulation || undefined, course_id: bulkCourse || undefined,
+                    current_year: bulkYear || undefined, current_semester: bulkSemester || undefined
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+            setBulkResult(data);
+            toast.success(`Created ${data.total_created} students, skipped ${data.total_skipped}`);
+            fetchUsers();
+        } catch (err) { toast.error(err.message); }
+        finally { setBulkLoading(false); }
+    };
 
     const fadeUp = { hidden: { opacity: 0, y: 15 }, show: { opacity: 1, y: 0 } };
     const stagger = { hidden: {}, show: { transition: { staggerChildren: 0.06 } } };
@@ -122,6 +159,7 @@ const AdminDashboard = () => {
                     </div>
                     <div className="flex items-center gap-3">
                         <span className="text-sm text-heading font-medium hidden sm:block">{profile?.full_name}</span>
+                        <button onClick={() => setShowChangePassword(true)} className="p-2 text-muted hover:text-violet-400 transition-colors" title="Change Password"><Key className="w-4 h-4" /></button>
                         <ThemeToggle />
                         <button onClick={logout} className="p-2 text-muted hover:text-heading transition-colors"><LogOut className="w-4 h-4" /></button>
                     </div>
@@ -217,8 +255,8 @@ const AdminDashboard = () => {
                                                                         <button key={perm.key}
                                                                             onClick={() => handleUpdatePermissions(user.id, { [perm.key]: !enabled })}
                                                                             className={`flex items-center gap-3 p-3 rounded-xl border transition-all text-left ${enabled
-                                                                                    ? 'bg-green-500/5 border-green-500/20 hover:border-green-500/30'
-                                                                                    : 'bg-red-500/5 border-red-500/20 hover:border-red-500/30'}`}>
+                                                                                ? 'bg-green-500/5 border-green-500/20 hover:border-green-500/30'
+                                                                                : 'bg-red-500/5 border-red-500/20 hover:border-red-500/30'}`}>
                                                                             <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${enabled ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
                                                                                 {enabled ? <Unlock className="w-4 h-4 text-green-400" /> : <Lock className="w-4 h-4 text-red-400" />}
                                                                             </div>
@@ -347,8 +385,117 @@ const AdminDashboard = () => {
                             )}
                         </motion.div>
                     )}
+
+                    {/* BULK STUDENTS */}
+                    {activeTab === 'bulk' && (
+                        <motion.div key="bulk" initial="hidden" animate="show" exit={{ opacity: 0 }} variants={stagger}>
+                            <div className="max-w-lg mx-auto">
+                                <div className="bg-card border border-theme rounded-2xl p-6 space-y-4">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <div className="w-8 h-8 rounded-lg bg-violet-600/10 flex items-center justify-center">
+                                            <UserPlus className="w-4 h-4 text-violet-400" />
+                                        </div>
+                                        <div>
+                                            <h3 className="text-heading font-semibold text-sm">Create Student Accounts</h3>
+                                            <p className="text-xs text-muted">Bulk-create student auth accounts by roll number range</p>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs uppercase tracking-wider text-muted mb-1.5 font-medium">Roll Number Prefix</label>
+                                        <input value={bulkPrefix} onChange={e => setBulkPrefix(e.target.value.toUpperCase())} placeholder="e.g. 23011P05"
+                                            className="w-full px-3 py-2.5 bg-input border border-theme rounded-xl text-heading text-sm placeholder-faint focus:outline-none focus:border-violet-500/50 uppercase" />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs uppercase tracking-wider text-muted mb-1.5 font-medium">Start No.</label>
+                                            <input type="number" value={bulkStart} onChange={e => setBulkStart(e.target.value)} placeholder="01"
+                                                className="w-full px-3 py-2.5 bg-input border border-theme rounded-xl text-heading text-sm placeholder-faint focus:outline-none focus:border-violet-500/50" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs uppercase tracking-wider text-muted mb-1.5 font-medium">End No.</label>
+                                            <input type="number" value={bulkEnd} onChange={e => setBulkEnd(e.target.value)} placeholder="60"
+                                                className="w-full px-3 py-2.5 bg-input border border-theme rounded-xl text-heading text-sm placeholder-faint focus:outline-none focus:border-violet-500/50" />
+                                        </div>
+                                    </div>
+
+                                    <div className="border-t border-theme pt-3">
+                                        <p className="text-xs text-muted font-medium uppercase tracking-wider mb-2">Academic Context (optional)</p>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <select value={bulkRegulation} onChange={e => { setBulkRegulation(e.target.value); fetchCourses(e.target.value); }}
+                                                className="px-3 py-2 bg-input border border-theme rounded-lg text-heading text-sm focus:border-violet-500/50 focus:outline-none">
+                                                <option value="">Regulation</option>
+                                                {regulations.map(r => <option key={r.id} value={r.id}>{r.code}</option>)}
+                                            </select>
+                                            <select value={bulkCourse} onChange={e => setBulkCourse(e.target.value)}
+                                                className="px-3 py-2 bg-input border border-theme rounded-lg text-heading text-sm focus:border-violet-500/50 focus:outline-none">
+                                                <option value="">Course</option>
+                                                {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                            </select>
+                                            <div>
+                                                <label className="block text-[10px] text-muted uppercase mb-1">Year</label>
+                                                <input type="number" min={1} max={6} value={bulkYear} onChange={e => setBulkYear(+e.target.value)}
+                                                    className="w-full px-3 py-2 bg-input border border-theme rounded-lg text-heading text-sm focus:border-violet-500/50 focus:outline-none" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] text-muted uppercase mb-1">Semester</label>
+                                                <input type="number" min={1} max={2} value={bulkSemester} onChange={e => setBulkSemester(+e.target.value)}
+                                                    className="w-full px-3 py-2 bg-input border border-theme rounded-lg text-heading text-sm focus:border-violet-500/50 focus:outline-none" />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {bulkPrefix && bulkStart && bulkEnd && (() => {
+                                        const s = parseInt(bulkStart), e = parseInt(bulkEnd);
+                                        if (!isNaN(s) && !isNaN(e) && s <= e) {
+                                            const count = e - s + 1;
+                                            return (
+                                                <div className="bg-violet-600/5 border border-violet-500/10 rounded-xl p-3">
+                                                    <p className="text-xs text-muted">
+                                                        Will create <span className="text-violet-400 font-bold">{count}</span> accounts:
+                                                        <span className="text-heading font-mono ml-1">{bulkPrefix}{String(s).padStart(2, '0')}</span> → <span className="text-heading font-mono">{bulkPrefix}{String(e).padStart(2, '0')}</span>
+                                                    </p>
+                                                    <p className="text-[10px] text-muted mt-1">Default password: <code className="text-violet-400">test1234</code>. Existing roll numbers will be skipped.</p>
+                                                </div>
+                                            );
+                                        }
+                                        return null;
+                                    })()}
+
+                                    <button onClick={handleBulkCreate} disabled={bulkLoading}
+                                        className="w-full py-3 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-xl font-medium text-sm flex items-center justify-center gap-2 hover:from-violet-500 hover:to-purple-500 transition-all disabled:opacity-50 shadow-lg shadow-violet-600/20">
+                                        {bulkLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                                        {bulkLoading ? 'Creating...' : 'Create Student Accounts'}
+                                    </button>
+
+                                    {bulkResult && (
+                                        <div className="bg-card border border-theme rounded-xl p-4 space-y-2">
+                                            <p className="text-sm text-heading font-semibold">Results</p>
+                                            <div className="grid grid-cols-2 gap-2 text-xs">
+                                                <div className="bg-green-500/5 border border-green-500/20 rounded-lg p-2 text-center">
+                                                    <p className="text-green-400 font-bold text-lg">{bulkResult.total_created}</p>
+                                                    <p className="text-muted">Created</p>
+                                                </div>
+                                                <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-2 text-center">
+                                                    <p className="text-amber-400 font-bold text-lg">{bulkResult.total_skipped}</p>
+                                                    <p className="text-muted">Skipped</p>
+                                                </div>
+                                            </div>
+                                            {bulkResult.errors?.length > 0 && (
+                                                <div className="text-xs text-red-400 mt-2">
+                                                    {bulkResult.errors.map((e, i) => <p key={i}>{e.roll_number}: {e.error}</p>)}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </motion.div>
+                    )}
                 </AnimatePresence>
             </div>
+
+            <ChangePassword isOpen={showChangePassword} onClose={() => setShowChangePassword(false)} />
         </div>
     );
 };

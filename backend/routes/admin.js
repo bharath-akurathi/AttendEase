@@ -26,7 +26,7 @@ router.use(requireAdmin);
 // Service-role client for admin operations (bypass RLS)
 const supabaseService = createClient(
     process.env.SUPABASE_URL,
-    process.env.SUPABASE_ANON_KEY
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
 );
 
 // 1. System Statistics
@@ -236,6 +236,89 @@ router.get('/subjects', async (req, res) => {
         if (error) throw error;
         res.json(data || []);
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 8. Bulk Create Students by Roll Number Range
+router.post('/students/bulk-range', async (req, res) => {
+    try {
+        const { prefix, start, end, regulation_id, course_id, current_year, current_semester } = req.body;
+        if (!prefix || start === undefined || end === undefined) {
+            return res.status(400).json({ error: 'prefix, start, and end are required' });
+        }
+
+        const startNum = parseInt(start);
+        const endNum = parseInt(end);
+        if (isNaN(startNum) || isNaN(endNum) || startNum > endNum) {
+            return res.status(400).json({ error: 'Invalid range: start must be <= end' });
+        }
+        if (endNum - startNum + 1 > 200) {
+            return res.status(400).json({ error: 'Maximum 200 students per batch' });
+        }
+
+        const created = [];
+        const skipped = [];
+        const errors = [];
+
+        for (let i = startNum; i <= endNum; i++) {
+            const padWidth = String(end).length;
+            const rollNo = `${prefix.toUpperCase()}${String(i).padStart(padWidth, '0')}`;
+
+            if (rollNo.length !== 10) {
+                errors.push({ roll_number: rollNo, error: 'Roll number must be exactly 10 characters long' });
+                continue;
+            }
+
+            // Check if student already exists
+            const { data: existing } = await supabaseService
+                .from('profiles')
+                .select('id, roll_number')
+                .eq('roll_number', rollNo)
+                .maybeSingle();
+
+            if (existing) {
+                skipped.push(rollNo);
+                continue;
+            }
+
+            // Create auth account
+            const email = `${rollNo.toLowerCase()}@student.attendease.local`;
+            const { data: authData, error: authError } = await supabaseService.auth.admin.createUser({
+                email,
+                password: crypto.randomUUID() + crypto.randomUUID(),
+                email_confirm: true,
+                user_metadata: {
+                    full_name: rollNo,
+                    role: 'student',
+                    roll_number: rollNo
+                }
+            });
+
+            if (authError) {
+                errors.push({ roll_number: rollNo, error: authError.message });
+                continue;
+            }
+
+            // Update profile with academic context
+            if (regulation_id || course_id || current_year || current_semester) {
+                await supabaseService
+                    .from('profiles')
+                    .update({
+                        regulation_id: regulation_id || null,
+                        course_id: course_id || null,
+                        current_year: current_year || null,
+                        current_semester: current_semester || null
+                    })
+                    .eq('id', authData.user.id);
+            }
+
+            created.push(rollNo);
+        }
+
+        res.status(201).json({ created, skipped, errors, total_created: created.length, total_skipped: skipped.length });
+    } catch (err) {
+        console.error('[admin/students/bulk-range]', err);
         res.status(500).json({ error: err.message });
     }
 });

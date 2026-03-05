@@ -141,8 +141,8 @@ const StudentDashboard = () => {
                             <button key={`${opt.year}-${opt.semester}`}
                                 onClick={() => { setSelectedYear(opt.year); setSelectedSemester(opt.semester); }}
                                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${selectedYear === opt.year && selectedSemester === opt.semester
-                                        ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/25'
-                                        : 'bg-card border border-theme text-muted hover:text-heading'
+                                    ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/25'
+                                    : 'bg-card border border-theme text-muted hover:text-heading'
                                     }`}>{opt.label}</button>
                         ))}
                     </div>

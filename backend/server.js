@@ -6,6 +6,7 @@ import academicRoutes from './routes/academic.js';
 import subjectRoutes from './routes/subjects.js';
 import adminRoutes from './routes/admin.js';
 import timetableRoutes from './routes/timetables.js';
+import authRoutes from './routes/auth.js';
 
 dotenv.config();
 
@@ -16,6 +17,7 @@ app.use(cors());
 app.use(express.json());
 
 // Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/academic', academicRoutes);
 app.use('/api/subjects', subjectRoutes);
