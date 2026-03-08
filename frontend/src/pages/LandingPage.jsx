@@ -50,8 +50,8 @@ const LandingPage = () => {
                                     </div>
                                 </Link>
                                 <div className="flex items-center gap-3">
-                                    <a href="#features" className="text-xs text-muted hover:text-heading transition-colors hidden sm:block">Features</a>
-                                    <a href="#how" className="text-xs text-muted hover:text-heading transition-colors hidden sm:block">How it Works</a>
+                                    <button onClick={(e) => { e.preventDefault(); document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' }); }} className="text-xs text-muted hover:text-heading transition-colors hidden sm:block">Features</button>
+                                    <button onClick={(e) => { e.preventDefault(); document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' }); }} className="text-xs text-muted hover:text-heading transition-colors hidden sm:block">How it Works</button>
                                     <ThemeToggle />
                                     <button
                                         onClick={() => navigate('/login')}
@@ -104,9 +104,9 @@ const LandingPage = () => {
                                         className="group px-8 py-3.5 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-2xl text-sm font-semibold flex items-center gap-2 hover:from-violet-500 hover:to-purple-500 transition-all shadow-2xl shadow-violet-600/30">
                                         Get Started <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                                     </button>
-                                    <a href="#features" className="px-6 py-3.5 border border-theme text-body rounded-2xl text-sm font-medium hover:text-heading transition-all">
+                                    <button onClick={(e) => { e.preventDefault(); document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' }); }} className="px-6 py-3.5 border border-theme text-body rounded-2xl text-sm font-medium hover:text-heading transition-all">
                                         Learn More
-                                    </a>
+                                    </button>
                                 </motion.div>
 
                                 <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.6 }}

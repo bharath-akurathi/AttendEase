@@ -1,6 +1,8 @@
 import express from 'express';
 import { requireAuth } from '../middleware/authMiddleware.js';
 import { createClient } from '@supabase/supabase-js';
+import { validateRequest } from '../middleware/validateRequest.js';
+import { z } from 'zod';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -55,6 +57,13 @@ router.get('/users', async (req, res) => {
             query = query.or(`full_name.ilike.%${req.query.search}%,roll_number.ilike.%${req.query.search}%`);
         }
 
+        const limit = parseInt(req.query.limit);
+        const offset = parseInt(req.query.offset);
+        if (!isNaN(limit)) {
+            const start = isNaN(offset) ? 0 : offset;
+            query = query.range(start, start + limit - 1);
+        }
+
         const { data, error } = await query;
         if (error) throw error;
         res.json(data || []);
@@ -67,9 +76,6 @@ router.get('/users', async (req, res) => {
 const handleRoleUpdate = async (req, res) => {
     try {
         const { role } = req.body;
-        if (!['student', 'teacher', 'admin'].includes(role)) {
-            return res.status(400).json({ error: 'Invalid role' });
-        }
         if (req.params.id === req.user.sub && role !== 'admin') {
             return res.status(400).json({ error: 'Cannot demote yourself' });
         }
@@ -85,11 +91,57 @@ const handleRoleUpdate = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
-router.put('/users/:id/role', handleRoleUpdate);
-router.patch('/users/:id/role', handleRoleUpdate);
 
-// 3b. Update Teacher Permissions
-router.patch('/users/:id/permissions', async (req, res) => {
+const roleValidation = validateRequest({
+    body: z.object({ role: z.enum(['student', 'teacher', 'admin']) })
+});
+
+router.put('/users/:id/role', roleValidation, handleRoleUpdate);
+router.patch('/users/:id/role', roleValidation, handleRoleUpdate);
+
+// 3a. Delete User
+router.delete('/users/:id', async (req, res) => {
+    try {
+        if (req.params.id === req.user.sub) {
+            return res.status(400).json({ error: 'Cannot delete yourself' });
+        }
+        const { error } = await supabaseService.auth.admin.deleteUser(req.params.id);
+        if (error) throw error;
+
+        const { error: profileError } = await req.supabase
+            .from('profiles')
+            .delete()
+            .eq('id', req.params.id);
+        if (profileError) throw profileError;
+
+        res.json({ message: 'User deleted' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 3b. Reset Password
+router.patch('/users/:id/password', validateRequest({
+    body: z.object({ password: z.string().min(6, 'Password must be at least 6 characters') })
+}), async (req, res) => {
+    try {
+        const { password } = req.body;
+        const { error } = await supabaseService.auth.admin.updateUserById(req.params.id, { password });
+        if (error) throw error;
+        res.json({ message: 'Password updated' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 3c. Update Teacher Permissions
+router.patch('/users/:id/permissions', validateRequest({
+    body: z.object({
+        can_create_subjects: z.boolean().optional(),
+        can_edit_subjects: z.boolean().optional(),
+        can_delete_subjects: z.boolean().optional()
+    })
+}), async (req, res) => {
     try {
         const allowedKeys = ['can_create_subjects', 'can_edit_subjects', 'can_delete_subjects'];
         const updates = {};
@@ -113,13 +165,18 @@ router.patch('/users/:id/permissions', async (req, res) => {
 });
 
 // 4. Create Student Account
-router.post('/students', async (req, res) => {
+router.post('/students', validateRequest({
+    body: z.object({
+        roll_number: z.string().min(1, 'Roll number is required'),
+        full_name: z.string().min(1, 'Full name is required'),
+        regulation_id: z.string().uuid().optional().nullable(),
+        course_id: z.string().uuid().optional().nullable(),
+        current_year: z.number().int().min(1).max(6).optional().nullable(),
+        current_semester: z.number().int().min(1).max(2).optional().nullable()
+    })
+}), async (req, res) => {
     try {
         const { roll_number, full_name, regulation_id, course_id, current_year, current_semester } = req.body;
-
-        if (!roll_number || !full_name) {
-            return res.status(400).json({ error: 'roll_number and full_name required' });
-        }
 
         // Check if roll number already exists
         const { data: existing } = await req.supabase
@@ -175,10 +232,17 @@ router.post('/students', async (req, res) => {
 });
 
 // 5. Assign Roll Number to Existing User
-router.put('/users/:id/roll-number', async (req, res) => {
+router.put('/users/:id/roll-number', validateRequest({
+    body: z.object({
+        roll_number: z.string().min(1, 'Roll number is required'),
+        regulation_id: z.string().uuid().optional().nullable(),
+        course_id: z.string().uuid().optional().nullable(),
+        current_year: z.number().int().min(1).max(6).optional().nullable(),
+        current_semester: z.number().int().min(1).max(2).optional().nullable()
+    })
+}), async (req, res) => {
     try {
         const { roll_number, regulation_id, course_id, current_year, current_semester } = req.body;
-        if (!roll_number) return res.status(400).json({ error: 'roll_number required' });
 
         const update = { roll_number };
         if (regulation_id) update.regulation_id = regulation_id;
@@ -200,12 +264,14 @@ router.put('/users/:id/roll-number', async (req, res) => {
 });
 
 // 6. Advance Student Semester
-router.put('/students/:id/semester', async (req, res) => {
+router.put('/students/:id/semester', validateRequest({
+    body: z.object({
+        current_year: z.number().int().min(1).max(6),
+        current_semester: z.number().int().min(1).max(2)
+    })
+}), async (req, res) => {
     try {
         const { current_year, current_semester } = req.body;
-        if (!current_year || !current_semester) {
-            return res.status(400).json({ error: 'current_year and current_semester required' });
-        }
 
         const { data, error } = await req.supabase
             .from('profiles')
@@ -241,12 +307,19 @@ router.get('/subjects', async (req, res) => {
 });
 
 // 8. Bulk Create Students by Roll Number Range
-router.post('/students/bulk-range', async (req, res) => {
+router.post('/students/bulk-range', validateRequest({
+    body: z.object({
+        prefix: z.string().min(1),
+        start: z.union([z.string(), z.number()]),
+        end: z.union([z.string(), z.number()]),
+        regulation_id: z.string().uuid().optional().nullable(),
+        course_id: z.string().uuid().optional().nullable(),
+        current_year: z.number().int().min(1).max(6).optional().nullable(),
+        current_semester: z.number().int().min(1).max(2).optional().nullable()
+    })
+}), async (req, res) => {
     try {
         const { prefix, start, end, regulation_id, course_id, current_year, current_semester } = req.body;
-        if (!prefix || start === undefined || end === undefined) {
-            return res.status(400).json({ error: 'prefix, start, and end are required' });
-        }
 
         const startNum = parseInt(start);
         const endNum = parseInt(end);

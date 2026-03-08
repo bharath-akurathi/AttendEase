@@ -1,5 +1,7 @@
 import express from 'express';
 import { requireAuth } from '../middleware/authMiddleware.js';
+import { validateRequest } from '../middleware/validateRequest.js';
+import { z } from 'zod';
 
 const router = express.Router();
 router.use(requireAuth);
@@ -49,6 +51,13 @@ router.get('/', async (req, res) => {
         }
         // admin: no filter, sees all
 
+        const limit = parseInt(req.query.limit);
+        const offset = parseInt(req.query.offset);
+        if (!isNaN(limit)) {
+            const start = isNaN(offset) ? 0 : offset;
+            query = query.range(start, start + limit - 1);
+        }
+
         const { data, error } = await query;
         if (error) throw error;
         res.json(data || []);
@@ -58,16 +67,24 @@ router.get('/', async (req, res) => {
 });
 
 // POST create subject
-router.post('/', async (req, res) => {
+router.post('/', validateRequest({
+    body: z.object({
+        regulation_id: z.string().uuid(),
+        course_id: z.string().uuid(),
+        year: z.union([z.string(), z.number()]),
+        semester: z.union([z.string(), z.number()]),
+        name: z.string().min(1),
+        code: z.string().min(1),
+        section: z.string().optional().nullable(),
+        credits: z.number().optional().nullable()
+    })
+}), async (req, res) => {
     try {
         if (!await checkTeacherOrAdmin(req)) {
             return res.status(403).json({ error: 'Teachers/admins only' });
         }
 
         const { regulation_id, course_id, year, semester, name, code, section, credits } = req.body;
-        if (!regulation_id || !course_id || !year || !semester || !name || !code) {
-            return res.status(400).json({ error: 'regulation_id, course_id, year, semester, name, code are required' });
-        }
 
         const { data, error } = await req.supabase
             .from('subjects')
@@ -92,7 +109,16 @@ router.post('/', async (req, res) => {
 });
 
 // PUT update subject
-router.put('/:id', async (req, res) => {
+router.put('/:id', validateRequest({
+    body: z.object({
+        name: z.string().min(1).optional(),
+        code: z.string().min(1).optional(),
+        section: z.string().optional().nullable(),
+        credits: z.number().optional().nullable(),
+        is_active: z.boolean().optional(),
+        teacher_id: z.string().uuid().optional().nullable()
+    })
+}), async (req, res) => {
     try {
         if (!await checkTeacherOrAdmin(req)) {
             return res.status(403).json({ error: 'Teachers/admins only' });
@@ -129,7 +155,7 @@ router.delete('/:id', async (req, res) => {
 
         const { error } = await req.supabase
             .from('subjects')
-            .delete()
+            .update({ is_active: false })
             .eq('id', req.params.id);
         if (error) throw error;
         res.json({ message: 'Subject deleted' });
@@ -154,14 +180,18 @@ router.get('/:id/students', async (req, res) => {
 });
 
 // POST add student to subject by roll number
-router.post('/:id/students', async (req, res) => {
+router.post('/:id/students', validateRequest({
+    body: z.object({
+        roll_number: z.string().min(1, 'roll_number required'),
+        student_name: z.string().optional()
+    })
+}), async (req, res) => {
     try {
         if (!await checkTeacherOrAdmin(req)) {
             return res.status(403).json({ error: 'Teachers/admins only' });
         }
 
         const { roll_number, student_name } = req.body;
-        if (!roll_number) return res.status(400).json({ error: 'roll_number required' });
 
         // Find student by roll number
         const { data: student } = await req.supabase
@@ -207,13 +237,24 @@ router.delete('/:id/students/:stuId', async (req, res) => {
 });
 
 // POST bulk add students (supports roll_numbers array OR prefix+start+end range)
-router.post('/:id/students/bulk', async (req, res) => {
+router.post('/:id/students/bulk', validateRequest({
+    body: z.object({
+        roll_numbers: z.array(z.string()).optional(),
+        prefix: z.string().optional(),
+        start: z.union([z.string(), z.number()]).optional(),
+        end: z.union([z.string(), z.number()]).optional(),
+        regulation_id: z.string().uuid().optional().nullable(),
+        course_id: z.string().uuid().optional().nullable(),
+        current_year: z.number().int().min(1).max(6).optional().nullable(),
+        current_semester: z.number().int().min(1).max(2).optional().nullable()
+    })
+}), async (req, res) => {
     try {
         if (!await checkTeacherOrAdmin(req)) {
             return res.status(403).json({ error: 'Teachers/admins only' });
         }
 
-        const { roll_numbers, prefix, start, end } = req.body;
+        const { roll_numbers, prefix, start, end, regulation_id, course_id, current_year, current_semester } = req.body;
         let rollList = [];
 
         if (prefix !== undefined && start !== undefined && end !== undefined) {
@@ -250,9 +291,12 @@ router.post('/:id/students/bulk', async (req, res) => {
         const errors = [];
 
         for (const rollNo of rollList) {
-            if (rollNo.length !== 10) {
-                errors.push({ roll_number: rollNo, error: 'Roll number must be exactly 10 characters long' });
-                continue;
+            if (!/^[0-9]{2}[A-Z0-9]{2}1[A-Z][A-Z0-9]{4}$/.test(rollNo) && !/^[0-9]{2}[A-Z0-9]{2}5[A-Z][A-Z0-9]{4}$/.test(rollNo) && rollNo.length !== 10) {
+                // Modified regex slightly to be flexible just in case, while keeping length 10
+                if (rollNo.length !== 10 || !/^[A-Z0-9]{10}$/.test(rollNo)) {
+                    errors.push({ roll_number: rollNo, error: 'Roll number must be exactly 10 alphanumeric characters' });
+                    continue;
+                }
             }
 
             // Check if profile exists
@@ -281,8 +325,22 @@ router.post('/:id/students/bulk', async (req, res) => {
                     continue;
                 }
 
-                // Wait for trigger to create profile, then fetch it
+                // Wait for trigger to finish creating the baseline profile
                 await new Promise(r => setTimeout(r, 200));
+
+                // Assign academic context to newly created profile
+                if (regulation_id || course_id || current_year || current_semester) {
+                    await supabaseService
+                        .from('profiles')
+                        .update({
+                            regulation_id: regulation_id || null,
+                            course_id: course_id || null,
+                            current_year: current_year || null,
+                            current_semester: current_semester || null
+                        })
+                        .eq('id', authData.user.id);
+                }
+
                 const { data: newProfile } = await supabaseService
                     .from('profiles')
                     .select('id, roll_number')
@@ -291,6 +349,17 @@ router.post('/:id/students/bulk', async (req, res) => {
 
                 student = newProfile;
                 created.push(rollNo);
+            } else if (regulation_id || course_id || current_year || current_semester) {
+                // If student exists but they provided context via bulk form, we can update it too
+                await supabaseService
+                    .from('profiles')
+                    .update({
+                        regulation_id: regulation_id || null,
+                        course_id: course_id || null,
+                        current_year: current_year || null,
+                        current_semester: current_semester || null
+                    })
+                    .eq('id', student.id);
             }
 
             if (!student) {
@@ -366,9 +435,21 @@ router.get('/:id/export', async (req, res) => {
             }
         });
 
-        let csv = 'Roll Number,Name,Total Absences,Absent Dates\n';
+        // Get total valid class sessions
+        const { count: totalClasses, error: countError } = await req.supabase
+            .from('class_sessions')
+            .select('*', { count: 'exact', head: true })
+            .eq('subject_id', req.params.id)
+            .eq('status', 'held');
+        if (countError) throw countError;
+
+
+
+        let csv = 'Roll Number,Name,Total Classes,Total Absences,Attendance %,Absent Dates\n';
         Object.values(studentMap).forEach(s => {
-            csv += `"${s.roll}","${s.name}",${s.absences.length},"${s.absences.join('; ')}"\n`;
+            const abs = s.absences.length;
+            const perc = totalClasses > 0 ? (((totalClasses - abs) / totalClasses) * 100).toFixed(2) + '%' : 'N/A';
+            csv += `"${s.roll}","${s.name}",${totalClasses},${abs},"${perc}","${s.absences.join('; ')}"\n`;
         });
 
         res.setHeader('Content-Type', 'text/csv');

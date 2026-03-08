@@ -2,10 +2,21 @@ import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { requireAuth } from '../middleware/authMiddleware.js';
+import { validateRequest } from '../middleware/validateRequest.js';
+import { z } from 'zod';
+import { rateLimit } from 'express-rate-limit';
 import dotenv from 'dotenv';
 dotenv.config();
 
 const router = express.Router();
+
+const lookupLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 20, // Limit each IP to 20 login lookups per 15 minutes
+    message: { error: 'Too many login attempts from this IP, please try again after 15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 
 const supabaseAdmin = createClient(
     process.env.SUPABASE_URL,
@@ -21,12 +32,13 @@ const JWT_SECRET = process.env.SUPABASE_JWT_SECRET;
 
 // POST /api/auth/student-lookup — Password-less student login via Roll Number
 // Returns a read-only JWT token (not a Supabase session)
-router.post('/student-lookup', async (req, res) => {
+router.post('/student-lookup', lookupLimiter, validateRequest({
+    body: z.object({
+        roll_number: z.string().min(1, 'Roll number is required')
+    })
+}), async (req, res) => {
     try {
         const { roll_number } = req.body;
-        if (!roll_number) {
-            return res.status(400).json({ error: 'roll_number is required' });
-        }
 
         const formattedRoll = roll_number.trim().toUpperCase();
 
@@ -75,7 +87,11 @@ router.post('/student-lookup', async (req, res) => {
 });
 
 // POST /api/auth/change-password — Change password for the logged-in user (teachers/admins only)
-router.post('/change-password', requireAuth, async (req, res) => {
+router.post('/change-password', requireAuth, validateRequest({
+    body: z.object({
+        new_password: z.string().min(6, 'New password must be at least 6 characters')
+    })
+}), async (req, res) => {
     try {
         // Block students from changing password
         if (req.user.read_only) {
@@ -83,9 +99,6 @@ router.post('/change-password', requireAuth, async (req, res) => {
         }
 
         const { new_password } = req.body;
-        if (!new_password || new_password.length < 6) {
-            return res.status(400).json({ error: 'New password must be at least 6 characters' });
-        }
 
         const userId = req.user.sub;
 

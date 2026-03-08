@@ -58,6 +58,7 @@ const StudentDashboard = () => {
     };
 
     const totalClasses = subjects.reduce((s, x) => s + (x.total_classes || 0), 0);
+    const totalHolidays = subjects.reduce((s, x) => s + (x.total_holidays || 0), 0);
     const totalAbsences = subjects.reduce((s, x) => s + (x.total_absences || 0), 0);
     const totalAttended = totalClasses - totalAbsences;
     const overallPct = totalClasses > 0 ? (totalAttended / totalClasses) * 100 : 100;
@@ -115,12 +116,13 @@ const StudentDashboard = () => {
                             </span>
                         </div>
                     </motion.div>
-                    <motion.div variants={fadeUp} className="md:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <motion.div variants={fadeUp} className="md:col-span-2 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
                         {[
                             { label: 'Subjects', value: subjects.length, icon: BookOpen, color: 'violet' },
                             { label: 'Absences', value: totalAbsences, icon: Calendar, color: 'red' },
                             { label: 'Attended', value: totalAttended, icon: TrendingUp, color: 'green' },
-                            { label: 'Total Classes', value: totalClasses, icon: Flame, color: 'amber' },
+                            { label: 'Classes', value: totalClasses, icon: Flame, color: 'amber' },
+                            { label: 'Holidays', value: totalHolidays, icon: BookOpen, color: 'blue' },
                         ].map(stat => (
                             <motion.div key={stat.label} variants={fadeUp} className="bg-card border border-theme rounded-xl p-4">
                                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center mb-2 bg-${stat.color}-600/10`}>
@@ -161,7 +163,7 @@ const StudentDashboard = () => {
                 ) : (
                     <motion.div variants={stagger} initial="hidden" animate="show" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         {subjects.map(sub => {
-                            const tc = sub.total_classes || 0, abs = sub.total_absences || 0;
+                            const tc = sub.total_classes || 0, abs = sub.total_absences || 0, hol = sub.total_holidays || 0;
                             const pct = tc > 0 ? ((tc - abs) / tc) * 100 : 100;
                             return (
                                 <motion.div key={sub.subject_id} variants={fadeUp}
@@ -179,6 +181,7 @@ const StudentDashboard = () => {
                                     <div className="flex gap-4 text-xs text-muted">
                                         <span>Classes: <span className="text-body">{tc}</span></span>
                                         <span>Absences: <span className={abs > 0 ? 'text-red-400' : 'text-body'}>{abs}</span></span>
+                                        {hol > 0 && <span>Holidays: <span className="text-blue-400">{hol}</span></span>}
                                     </div>
                                 </motion.div>
                             );

@@ -26,13 +26,21 @@ export const AuthProvider = ({ children }) => {
                 }
                 return prev;
             });
-        }, 5000);
+        }, 3000);
 
         // Check for stored student session first
         const storedStudent = localStorage.getItem('attendease_student');
         if (storedStudent) {
             try {
                 const parsed = JSON.parse(storedStudent);
+                if (parsed.token) {
+                    const base64Url = parsed.token.split('.')[1];
+                    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                    const payload = JSON.parse(atob(base64));
+                    if (payload.exp * 1000 < Date.now()) {
+                        throw new Error('Token expired');
+                    }
+                }
                 setUser({ id: parsed.profile.id });
                 setProfile(parsed.profile);
                 setSession({ access_token: parsed.token });
@@ -43,7 +51,7 @@ export const AuthProvider = ({ children }) => {
         }
 
         // Check Supabase session (for teachers/admins)
-        supabase.auth.getSession().then(({ data: { session: s }, error }) => {
+        supabase.auth.getSession().then(async ({ data: { session: s }, error }) => {
             if (error || !s?.user) {
                 setUser(null);
                 setProfile(null);
@@ -53,8 +61,10 @@ export const AuthProvider = ({ children }) => {
             }
             setUser(s.user);
             setSession(s);
-            setAuthMode('supabase');
-            fetchProfile(s.user.id);
+            // Fetch profile to determine authMode based on role
+            const profileData = await fetchProfile(s.user.id); // fetchProfile now returns the profile
+            setAuthMode(profileData?.role === 'admin' ? 'admin' : 'teacher');
+            setLoading(false); // Set loading to false after profile is fetched and authMode is set
         }).catch(() => setLoading(false));
 
         const { data: authListener } = supabase.auth.onAuthStateChange(
@@ -73,10 +83,12 @@ export const AuthProvider = ({ children }) => {
                 if (s?.user) {
                     setUser(s.user);
                     setSession(s);
-                    setAuthMode('supabase');
                     // We only want to fetch profile if we haven't already and aren't about to
                     if (!profile || profile.id !== s.user.id) {
-                        await fetchProfile(s.user.id);
+                        const profileData = await fetchProfile(s.user.id);
+                        setAuthMode(profileData?.role === 'admin' ? 'admin' : 'teacher');
+                    } else {
+                        setAuthMode(profile.role === 'admin' ? 'admin' : 'teacher');
                     }
                 } else {
                     setUser(null);
@@ -107,12 +119,15 @@ export const AuthProvider = ({ children }) => {
 
             if (!error && data) {
                 setProfile(data);
+                return data;
             } else {
                 setProfile(null);
+                return null;
             }
         } catch (error) {
             console.error('Failed to fetch profile', error);
             setProfile(null);
+            return null;
         } finally {
             setLoading(false);
         }
@@ -172,7 +187,11 @@ export const AuthProvider = ({ children }) => {
         supabase.auth.signOut({ scope: 'local' }).catch(() => { });
         // Immediately clear everything
         localStorage.removeItem('attendease_student');
-        localStorage.removeItem('sb-bhdyidkhbgshpadxlwjb-auth-token');
+        for (const key of Object.keys(localStorage)) {
+            if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
+                localStorage.removeItem(key);
+            }
+        }
         setUser(null);
         setProfile(null);
         setSession(null);

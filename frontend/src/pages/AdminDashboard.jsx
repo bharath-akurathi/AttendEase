@@ -92,10 +92,33 @@ const AdminDashboard = () => {
         } catch (err) { toast.error(err.message); }
     };
 
+    const handleDeleteUser = async (id) => {
+        if (!window.confirm('Are you sure you want to completely delete this user? This cannot be undone.')) return;
+        try {
+            const res = await fetch(`${API_BASE}/api/admin/users/${id}`, { method: 'DELETE', headers });
+            if (!res.ok) throw new Error((await res.json()).error || 'Failed to delete');
+            toast.success('User deleted'); fetchUsers();
+        } catch (err) { toast.error(err.message); }
+    };
+
+    const handleResetUserPassword = async (user) => {
+        const newPassword = window.prompt(`Enter new password for ${user.full_name || user.email} (min 6 chars):`);
+        if (!newPassword) return;
+        if (newPassword.length < 6) return toast.error('Password must be at least 6 characters');
+
+        try {
+            const res = await fetch(`${API_BASE}/api/admin/users/${user.id}/password`, {
+                method: 'PATCH', headers, body: JSON.stringify({ password: newPassword })
+            });
+            if (!res.ok) throw new Error((await res.json()).error || 'Failed to reset password');
+            toast.success('Password updated successfully');
+        } catch (err) { toast.error(err.message); }
+    };
+
     const handleCreateRegulation = async (e) => {
         e.preventDefault();
         try {
-            const res = await fetch(`${API_BASE}/api/admin/regulations`, { method: 'POST', headers, body: JSON.stringify(newReg) });
+            const res = await fetch(`${API_BASE}/api/academic/regulations`, { method: 'POST', headers, body: JSON.stringify(newReg) });
             if (!res.ok) throw new Error('Failed');
             toast.success('Regulation created'); setShowRegForm(false); setNewReg({ code: '', name: '', start_year: 2022 }); fetchRegulations();
         } catch (err) { toast.error(err.message); }
@@ -104,14 +127,14 @@ const AdminDashboard = () => {
     const handleCreateCourse = async (e) => {
         e.preventDefault();
         try {
-            const res = await fetch(`${API_BASE}/api/admin/courses`, { method: 'POST', headers, body: JSON.stringify(newCourse) });
+            const res = await fetch(`${API_BASE}/api/academic/courses`, { method: 'POST', headers, body: JSON.stringify(newCourse) });
             if (!res.ok) throw new Error('Failed');
             toast.success('Course created'); setShowCourseForm(false); setNewCourse({ name: '', code: '', regulation_id: '', total_semesters: 8 }); fetchCourses(newCourse.regulation_id);
         } catch (err) { toast.error(err.message); }
     };
 
-    const handleDeleteRegulation = async (id) => { try { await fetch(`${API_BASE}/api/admin/regulations/${id}`, { method: 'DELETE', headers }); toast.success('Deleted'); fetchRegulations(); } catch { toast.error('Failed'); } };
-    const handleDeleteCourse = async (id) => { try { await fetch(`${API_BASE}/api/admin/courses/${id}`, { method: 'DELETE', headers }); toast.success('Deleted'); } catch { toast.error('Failed'); } };
+    const handleDeleteRegulation = async (id) => { try { await fetch(`${API_BASE}/api/academic/regulations/${id}`, { method: 'DELETE', headers }); toast.success('Deleted'); fetchRegulations(); } catch { toast.error('Failed'); } };
+    const handleDeleteCourse = async (id) => { try { await fetch(`${API_BASE}/api/academic/courses/${id}`, { method: 'DELETE', headers }); toast.success('Deleted'); } catch { toast.error('Failed'); } };
 
     const tabs = [
         { id: 'overview', label: 'Overview', icon: BarChart3 },
@@ -232,6 +255,8 @@ const AdminDashboard = () => {
                                                             <Settings className="w-4 h-4" />
                                                         </button>
                                                     )}
+                                                    <button onClick={() => handleResetUserPassword(user)} className="p-1.5 text-muted hover:text-blue-400 transition-colors" title="Reset Password"><Key className="w-4 h-4" /></button>
+                                                    <button onClick={() => handleDeleteUser(user.id)} className="p-1.5 text-muted hover:text-red-400 transition-colors" title="Delete User"><Trash2 className="w-4 h-4" /></button>
                                                 </div>
                                             </div>
 
@@ -482,8 +507,9 @@ const AdminDashboard = () => {
                                                 </div>
                                             </div>
                                             {bulkResult.errors?.length > 0 && (
-                                                <div className="text-xs text-red-400 mt-2">
-                                                    {bulkResult.errors.map((e, i) => <p key={i}>{e.roll_number}: {e.error}</p>)}
+                                                <div className="text-xs text-red-500 mt-3 bg-red-50 border border-red-100 p-2 rounded-lg max-h-32 overflow-y-auto">
+                                                    <p className="font-bold mb-1 sticky top-0 bg-red-50">Errors encountered:</p>
+                                                    {bulkResult.errors.map((e, i) => <p key={i} className="mb-0.5 whitespace-nowrap overflow-hidden text-ellipsis px-1">• <span className="font-mono">{e.roll_number}</span>: {e.error}</p>)}
                                                 </div>
                                             )}
                                         </div>

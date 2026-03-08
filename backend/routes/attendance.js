@@ -1,5 +1,7 @@
 import express from 'express';
 import { requireAuth } from '../middleware/authMiddleware.js';
+import { validateRequest } from '../middleware/validateRequest.js';
+import { z } from 'zod';
 
 const router = express.Router();
 router.use(requireAuth);
@@ -51,9 +53,16 @@ router.get('/history', async (req, res) => {
 });
 
 // POST submit/replace absences for subject + date (idempotent)
-router.post('/', async (req, res) => {
+router.post('/', validateRequest({
+    body: z.object({
+        subjectId: z.string().uuid(),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD format"),
+        absentStudentIds: z.array(z.string().uuid()).optional().nullable(),
+        status: z.enum(['held', 'holiday', 'cancelled']).optional().default('held')
+    })
+}), async (req, res) => {
     const { supabase, user } = req;
-    const { subjectId, date, absentStudentIds } = req.body;
+    const { subjectId, date, absentStudentIds, status = 'held' } = req.body;
 
     // Check role
     const { data: profile } = await supabase
@@ -63,21 +72,34 @@ router.post('/', async (req, res) => {
         return res.status(403).json({ error: 'Only teachers can mark attendance' });
     }
 
-    if (!subjectId || !date) {
-        return res.status(400).json({ error: 'subjectId and date required' });
-    }
-
     try {
-        // Delete existing records for this subject+date
+        console.log(`[ATTENDANCE POST] User ${user.sub} marking ${subjectId} on ${date} as ${status} with ${absentStudentIds?.length || 0} absences`);
+
+        // 1. Upsert the class session
+        const { error: sessionError } = await supabase
+            .from('class_sessions')
+            .upsert(
+                { subject_id: subjectId, date: date, status: status, marked_by: user.sub },
+                { onConflict: 'subject_id,date' }
+            );
+        if (sessionError) {
+            console.error('[ATTENDANCE POST] sessionError:', sessionError);
+            throw sessionError;
+        }
+
+        // 2. Delete existing absence records for this subject+date to ensure idempotency
         const { error: deleteError } = await supabase
             .from('absence_records')
             .delete()
             .eq('subject_id', subjectId)
             .eq('date', date);
-        if (deleteError) throw deleteError;
+        if (deleteError) {
+            console.error('[ATTENDANCE POST] deleteError:', deleteError);
+            throw deleteError;
+        }
 
-        // Insert new absence records
-        if (absentStudentIds && absentStudentIds.length > 0) {
+        // 3. Insert new absence records if it's held and there are absences
+        if (status === 'held' && absentStudentIds && absentStudentIds.length > 0) {
             const records = absentStudentIds.map(studentId => ({
                 subject_id: subjectId,
                 student_id: studentId,
@@ -88,16 +110,23 @@ router.post('/', async (req, res) => {
             const { error: insertError } = await supabase
                 .from('absence_records')
                 .insert(records);
-            if (insertError) throw insertError;
+            if (insertError) {
+                console.error('[ATTENDANCE POST] insertError:', insertError);
+                throw insertError;
+            }
 
+            console.log(`[ATTENDANCE POST] Successfully saved ${records.length} absences`);
             return res.status(201).json({
                 message: 'Attendance saved successfully',
-                count: records.length
+                count: records.length,
+                status: status
             });
         }
 
-        res.json({ message: 'Attendance saved (no absences)', count: 0 });
+        console.log(`[ATTENDANCE POST] Successfully saved as ${status} (0 absences)`);
+        res.json({ message: `Session saved as ${status} (0 absences)`, count: 0, status: status });
     } catch (err) {
+        console.error('[ATTENDANCE POST] Catch err:', err);
         res.status(500).json({ error: err.message });
     }
 });

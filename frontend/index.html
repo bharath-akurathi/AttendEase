@@ -17,13 +17,20 @@
 
 <body>
   <script>
-    // Vite's client stores dependency signatures in localStorage. 
-    // If corrupted, it forces an infinite window.location.reload() loop.
-    // Clearing these specific keys fixes the loop without logging out the user.
+    // Force logout on every full page load/reload as requested
+    localStorage.removeItem('attendease_student');
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith('vite:')) {
         localStorage.removeItem(key);
       }
+      if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        localStorage.removeItem(key);
+      }
+    }
+
+    // Smoothly route to landing page on reload before React Router initializes
+    if (window.location.pathname !== '/' && window.location.pathname !== '/login') {
+      window.history.replaceState(null, '', '/');
     }
   </script>
   <div id="root"></div>

@@ -344,11 +344,9 @@ The frontend will be available at `http://localhost:80` and the backend API at `
 
 ## 🐛 Known Issues
 
-See [`todos.md`](./todos.md) for a full list of known bugs and planned improvements.
+See [`todos.md`](./todos.md) for a full list of known planned improvements.
 
-### Critical Bugs
-- **Page reload loop** — When a teacher or admin reloads the dashboard, the app can enter an infinite loading loop due to a race condition between the Supabase `onAuthStateChange` listener and the initial `getSession()` call. A 5-second timeout fallback exists in `AuthContext` as a partial mitigation. Root cause is likely stale or conflicting entries in localStorage Supabase auth keys.
-- **Admin cannot delete users or change passwords** — The admin dashboard currently supports role changes but does not expose UI for deleting user accounts or resetting another user's password. Backend support via the Supabase service-role client is partially in place in `admin.js` but the frontend implementation is missing.
+*Currently, the primary system runs stably with no known active show-stopping bugs.*
 
 ---
 

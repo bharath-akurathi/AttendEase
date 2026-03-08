@@ -29,6 +29,7 @@ const TeacherDashboard = () => {
     const [students, setStudents] = useState([]);
     const [absentIds, setAbsentIds] = useState(new Set());
     const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().split('T')[0]);
+    const [attendanceStatus, setAttendanceStatus] = useState('held');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -39,6 +40,10 @@ const TeacherDashboard = () => {
     const [bulkPrefix, setBulkPrefix] = useState('');
     const [bulkStart, setBulkStart] = useState('');
     const [bulkEnd, setBulkEnd] = useState('');
+    const [bulkRegulation, setBulkRegulation] = useState('');
+    const [bulkCourse, setBulkCourse] = useState('');
+    const [bulkYear, setBulkYear] = useState(1);
+    const [bulkSemester, setBulkSemester] = useState(1);
     const [bulkLoading, setBulkLoading] = useState(false);
     const [showChangePassword, setShowChangePassword] = useState(false);
 
@@ -83,7 +88,7 @@ const TeacherDashboard = () => {
         try {
             const res = await fetch(`${API_BASE}/api/attendance`, {
                 method: 'POST', headers,
-                body: JSON.stringify({ subjectId: selectedSubject.id, date: attendanceDate, absentStudentIds: Array.from(absentIds) })
+                body: JSON.stringify({ subjectId: selectedSubject.id, date: attendanceDate, absentStudentIds: Array.from(absentIds), status: attendanceStatus })
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
@@ -143,7 +148,11 @@ const TeacherDashboard = () => {
         try {
             const res = await fetch(`${API_BASE}/api/subjects/${selectedSubject.id}/students/bulk`, {
                 method: 'POST', headers,
-                body: JSON.stringify({ prefix: bulkPrefix, start: bulkStart, end: bulkEnd })
+                body: JSON.stringify({
+                    prefix: bulkPrefix, start: bulkStart, end: bulkEnd,
+                    regulation_id: bulkRegulation || undefined, course_id: bulkCourse || undefined,
+                    current_year: bulkYear || undefined, current_semester: bulkSemester || undefined
+                })
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
@@ -292,6 +301,12 @@ const TeacherDashboard = () => {
                                         <p className="text-xs text-muted">{selectedSubject.code}</p>
                                     </div>
                                     <div className="flex items-center gap-2">
+                                        <select value={attendanceStatus} onChange={e => setAttendanceStatus(e.target.value)}
+                                            className="px-3 py-2 bg-card border border-theme rounded-lg text-heading text-sm focus:border-violet-500/50 focus:outline-none">
+                                            <option value="held">Class Held</option>
+                                            <option value="holiday">Holiday</option>
+                                            <option value="cancelled">Cancelled</option>
+                                        </select>
                                         <input type="date" value={attendanceDate} onChange={e => { setAttendanceDate(e.target.value); fetchAbsences(selectedSubject.id, e.target.value); }}
                                             className="px-3 py-2 bg-card border border-theme rounded-lg text-heading text-sm focus:border-violet-500/50 focus:outline-none" />
                                         <button onClick={saveAttendance} disabled={saving}
@@ -303,8 +318,15 @@ const TeacherDashboard = () => {
                                 </div>
 
                                 <div className="flex items-center gap-3 mb-4">
-                                    <span className="text-xs text-muted">Absent: <span className="text-red-400 font-bold">{absentIds.size}</span> / {students.length}</span>
-                                    <span className="text-xs text-muted">Present: <span className="text-green-400 font-bold">{students.length - absentIds.size}</span></span>
+                                    {attendanceStatus === 'held' && (
+                                        <>
+                                            <span className="text-xs text-muted">Absent: <span className="text-red-400 font-bold">{absentIds.size}</span> / {students.length}</span>
+                                            <span className="text-xs text-muted">Present: <span className="text-green-400 font-bold">{students.length - absentIds.size}</span></span>
+                                        </>
+                                    )}
+                                    {attendanceStatus !== 'held' && (
+                                        <span className="text-xs text-amber-500 font-medium">Session marked as {attendanceStatus}. Absences will not be counted.</span>
+                                    )}
                                     {canEdit && (
                                         <div className="ml-auto flex items-center gap-2">
                                             <input value={newRollNumber} onChange={e => setNewRollNumber(e.target.value.toUpperCase())} placeholder="Add by Roll No"
@@ -401,6 +423,32 @@ const TeacherDashboard = () => {
                                         <label className="block text-xs uppercase tracking-wider text-muted mb-1.5 font-medium">End No.</label>
                                         <input type="number" value={bulkEnd} onChange={e => setBulkEnd(e.target.value)} placeholder="60"
                                             className="w-full px-3 py-2.5 bg-input border border-theme rounded-xl text-heading text-sm placeholder-faint focus:outline-none focus:border-violet-500/50" />
+                                    </div>
+                                </div>
+
+                                <div className="border-t border-theme pt-3 mt-3">
+                                    <p className="text-xs text-muted font-medium uppercase tracking-wider mb-2">Academic Context (optional)</p>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <select value={bulkRegulation} onChange={e => { setBulkRegulation(e.target.value); fetchCourses(e.target.value); }}
+                                            className="px-3 py-2 bg-input border border-theme rounded-lg text-heading text-sm focus:border-violet-500/50 focus:outline-none">
+                                            <option value="">Regulation</option>
+                                            {regulations.map(r => <option key={r.id} value={r.id}>{r.code}</option>)}
+                                        </select>
+                                        <select value={bulkCourse} onChange={e => setBulkCourse(e.target.value)}
+                                            className="px-3 py-2 bg-input border border-theme rounded-lg text-heading text-sm focus:border-violet-500/50 focus:outline-none">
+                                            <option value="">Course</option>
+                                            {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                        </select>
+                                        <div>
+                                            <label className="block text-[10px] text-muted uppercase mb-1">Year</label>
+                                            <input type="number" min={1} max={6} value={bulkYear} onChange={e => setBulkYear(+e.target.value)}
+                                                className="w-full px-3 py-2 bg-input border border-theme rounded-lg text-heading text-sm focus:border-violet-500/50 focus:outline-none" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] text-muted uppercase mb-1">Semester</label>
+                                            <input type="number" min={1} max={2} value={bulkSemester} onChange={e => setBulkSemester(+e.target.value)}
+                                                className="w-full px-3 py-2 bg-input border border-theme rounded-lg text-heading text-sm focus:border-violet-500/50 focus:outline-none" />
+                                        </div>
                                     </div>
                                 </div>
 

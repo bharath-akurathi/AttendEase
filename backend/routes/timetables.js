@@ -2,13 +2,22 @@ import express from 'express';
 import multer from 'multer';
 import { createClient } from '@supabase/supabase-js';
 import { requireAuth } from '../middleware/authMiddleware.js';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 const router = express.Router();
 router.use(requireAuth);
 
-// Multer config for file uploads (memory storage for Supabase upload)
+// Multer config for file uploads (disk storage to prevent Node memory exhaustion)
 const upload = multer({
-    storage: multer.memoryStorage(),
+    storage: multer.diskStorage({
+        destination: os.tmpdir(),
+        filename: (req, file, cb) => {
+            const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+            cb(null, `${Date.now()}-${safeName}`);
+        }
+    }),
     limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
     fileFilter: (req, file, cb) => {
         const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
@@ -188,14 +197,21 @@ router.post('/uploads', upload.single('file'), async (req, res) => {
         const safeFilename = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
         const storagePath = `${userId}/${timestamp}_${safeFilename}`;
 
-        // Step 1: Upload to Supabase Storage
+        // Step 1: Upload to Supabase Storage via stream
+        const fileStream = fs.createReadStream(req.file.path);
         const { data: uploadData, error: uploadError } = await req.supabase
             .storage
             .from('timetable-uploads')
-            .upload(storagePath, req.file.buffer, {
+            .upload(storagePath, fileStream, {
                 contentType: req.file.mimetype,
+                duplex: 'half',
                 upsert: false
             });
+
+        // Clean up local temp file
+        fs.unlink(req.file.path, (err) => {
+            if (err) console.error('[UPLOAD CLEANUP ERROR]', err.message);
+        });
 
         if (uploadError) {
             console.error('[UPLOAD] Storage upload failed:', uploadError.message);
@@ -290,19 +306,26 @@ router.put('/uploads/:id', upload.single('file'), async (req, res) => {
             // Delete old file
             await req.supabase.storage.from('timetable-uploads').remove([existing.file_path]);
 
-            // Upload new file
+            // Upload new file via stream
             const userId = req.user.sub;
             const timestamp = Date.now();
             const safeFilename = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
             const newPath = `${userId}/${timestamp}_${safeFilename}`;
 
+            const fileStream = fs.createReadStream(req.file.path);
             const { error: uploadError } = await req.supabase
                 .storage
                 .from('timetable-uploads')
-                .upload(newPath, req.file.buffer, {
+                .upload(newPath, fileStream, {
                     contentType: req.file.mimetype,
+                    duplex: 'half',
                     upsert: false
                 });
+
+            // Clean up local temp file
+            fs.unlink(req.file.path, (err) => {
+                if (err) console.error('[UPLOAD CLEANUP ERROR]', err.message);
+            });
 
             if (uploadError) throw uploadError;
 

@@ -19,6 +19,16 @@ export const ThemeProvider = ({ children }) => {
         document.documentElement.setAttribute('data-theme', theme);
     }, [theme]);
 
+    useEffect(() => {
+        const handleStorage = (e) => {
+            if (e.key === 'attendease-theme' && e.newValue) {
+                setTheme(e.newValue);
+            }
+        };
+        window.addEventListener('storage', handleStorage);
+        return () => window.removeEventListener('storage', handleStorage);
+    }, []);
+
     const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
 
     return (

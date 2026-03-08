@@ -5,9 +5,9 @@ import {
     Upload, Plus, Trash2, CalendarDays, Loader2, FileImage,
     FileText, Download, X, Eye, Edit3, Clock
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 
-const API_URL = 'http://localhost:5001/api';
+const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5001') + '/api';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -22,14 +22,17 @@ const item = {
 };
 
 export default function TimetableManager() {
+    const { getAccessToken } = useAuth();
     const [timetables, setTimetables] = useState([]);
     const [uploads, setUploads] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeView, setActiveView] = useState('entries'); // 'entries' or 'uploads'
 
+    const [subjects, setSubjects] = useState([]);
+
     // New entry form state
     const [newEntry, setNewEntry] = useState({
-        class_name: '', day_of_week: 1, start_time: '09:00', end_time: '10:00'
+        subject_id: '', day_of_week: 1, start_time: '09:00', end_time: '10:00'
     });
 
     // Edit entry state
@@ -46,16 +49,15 @@ export default function TimetableManager() {
     const [previewType, setPreviewType] = useState(null);
 
     const getAuthHeaders = async () => {
-        const { data: { session } } = await supabase.auth.getSession();
+        const token = getAccessToken();
         return {
-            'Authorization': `Bearer ${session?.access_token}`,
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
         };
     };
 
     const getAuthToken = async () => {
-        const { data: { session } } = await supabase.auth.getSession();
-        return session?.access_token;
+        return getAccessToken();
     };
 
     // ── Fetch Functions ──
@@ -85,9 +87,21 @@ export default function TimetableManager() {
         }
     };
 
+    const fetchSubjects = async () => {
+        try {
+            const headers = await getAuthHeaders();
+            const res = await fetch(`${API_URL}/subjects`, { headers });
+            if (res.ok) {
+                const data = await res.json();
+                setSubjects(Array.isArray(data) ? data : (data.data || []));
+            }
+        } catch (error) { }
+    };
+
     useEffect(() => {
         fetchTimetables();
         fetchUploads();
+        fetchSubjects();
     }, []);
 
     // ── In-App Entry CRUD ──
@@ -109,7 +123,7 @@ export default function TimetableManager() {
                 throw new Error(err.error || "Failed to add entry");
             }
             toast.success("Timetable entry added");
-            setNewEntry({ ...newEntry, class_name: '' });
+            setNewEntry({ ...newEntry, subject_id: '' });
             fetchTimetables();
         } catch (error) {
             toast.error(error.message);
@@ -263,11 +277,13 @@ export default function TimetableManager() {
                     {/* Add Entry Form */}
                     <form onSubmit={handleAddEntry} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end bg-slate-50 p-4 rounded-xl border border-slate-100 mb-6">
                         <div className="md:col-span-1">
-                            <label className="block text-xs font-semibold text-slate-600 mb-1">Class Name</label>
-                            <input required type="text" value={newEntry.class_name}
-                                onChange={e => setNewEntry({ ...newEntry, class_name: e.target.value })}
-                                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
-                                placeholder="e.g. Physics 101" />
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Subject</label>
+                            <select required value={newEntry.subject_id}
+                                onChange={e => setNewEntry({ ...newEntry, subject_id: e.target.value })}
+                                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all">
+                                <option value="">Select subject</option>
+                                {subjects.map(s => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
+                            </select>
                         </div>
                         <div className="md:col-span-1">
                             <label className="block text-xs font-semibold text-slate-600 mb-1">Day</label>
@@ -321,9 +337,11 @@ export default function TimetableManager() {
                                                 <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500"></div>
                                                 {editingId === cls.id ? (
                                                     <div className="flex-1 flex items-center gap-2 pl-2">
-                                                        <input type="text" value={editEntry.class_name}
-                                                            onChange={e => setEditEntry({ ...editEntry, class_name: e.target.value })}
-                                                            className="text-sm border rounded px-1 py-0.5 w-24" />
+                                                        <select value={editEntry.subject_id || ''}
+                                                            onChange={e => setEditEntry({ ...editEntry, subject_id: e.target.value })}
+                                                            className="text-sm border rounded px-1 py-0.5 w-24">
+                                                            {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                                        </select>
                                                         <input type="time" value={editEntry.start_time}
                                                             onChange={e => setEditEntry({ ...editEntry, start_time: e.target.value })}
                                                             className="text-xs border rounded px-1 py-0.5 w-20" />
@@ -339,14 +357,14 @@ export default function TimetableManager() {
                                                 ) : (
                                                     <>
                                                         <div className="pl-2">
-                                                            <p className="font-semibold text-slate-800 text-sm">{cls.class_name}</p>
+                                                            <p className="font-semibold text-slate-800 text-sm">{cls.subjects?.name || 'Unknown Class'}</p>
                                                             <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
                                                                 <Clock className="w-3 h-3" />
                                                                 {cls.start_time?.substring(0, 5)} – {cls.end_time?.substring(0, 5)}
                                                             </p>
                                                         </div>
                                                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                            <button onClick={() => { setEditingId(cls.id); setEditEntry({ class_name: cls.class_name, start_time: cls.start_time?.substring(0, 5), end_time: cls.end_time?.substring(0, 5), day_of_week: cls.day_of_week }); }}
+                                                            <button onClick={() => { setEditingId(cls.id); setEditEntry({ subject_id: cls.subject_id, start_time: cls.start_time?.substring(0, 5), end_time: cls.end_time?.substring(0, 5), day_of_week: cls.day_of_week }); }}
                                                                 className="text-slate-300 hover:text-indigo-500 transition-colors p-1">
                                                                 <Edit3 className="w-3.5 h-3.5" />
                                                             </button>
